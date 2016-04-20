@@ -11,9 +11,9 @@ public:
     void setTimeConst(float tc, float dt);
     void setFilterConst(float fc);
     void push(float value);
-    operator float();
+	operator float();
     void flush(float value = 0.f);
-
+    
 private:
     float fc;
     float currentValue;

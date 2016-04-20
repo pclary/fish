@@ -3,10 +3,10 @@
 
 
 template <typename T, int Capacity>
-class RingBuffer
+class RingBuffer 
 {
 public:
-    RingBuffer()
+    RingBuffer() 
     {
         headIndex = 0;
         size_ = 0;
@@ -23,7 +23,7 @@ public:
     int capacity() const
     {
         return Capacity;
-    }
+    } 
     void clear()
     {
         size_ = 0;
@@ -102,7 +102,7 @@ inline T RingBuffer<T, Capacity>::pop()
     headIndex = (headIndex - 1 + Capacity) % Capacity;
     if (size > 0)
         --size_;
-    return data[oldHead];
+    return data[oldHead]; 
 }
 
 

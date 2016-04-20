@@ -14,13 +14,13 @@ LowPass::LowPass(float fc) : fc(fc), currentValue(0.f)
 
 void LowPass::setCutoffFreq(float dt, float freq)
 {
-    fc = std::exp(-6.283185f * dt * freq);
+    fc = exp(-6.283185f * dt * freq);
 }
 
 
 void LowPass::setTimeConst(float dt, float tc)
 {
-    fc = std::exp(-dt / tc);
+    fc = exp(-dt / tc);
 }
 
 
