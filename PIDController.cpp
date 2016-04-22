@@ -43,28 +43,29 @@ void PIDController::zeroIntegral()
 
 float PIDController::update(float error, float feedForward)
 {
-    float ierrorTemp = ierror + error * dt;
+    // float ierrorTemp = ierror + error * dt;
 
     derror.push((error - lastError) / dt);
     lastError = error;
 
-    float control = feedForward + kp * error + ki * ierrorTemp + kd * derror;
+    // float control = feedForward + kp * error + ki * ierrorTemp + kd * derror;
+    float control = kp * error + kd * derror;
 
-    if (ki > 0.f)
-    {
-        // Don't integrate if the output is pinned at the limits
-        if ( !(control > outputMax && error > 0.f) &&
-             !(control < outputMin && error < 0.f) )
-        {
-            ierror = ierrorTemp;
-        }
+    // if (ki > 0.f)
+    // {
+    //     // Don't integrate if the output is pinned at the limits
+    //     if ( !(control > outputMax && error > 0.f) &&
+    //          !(control < outputMin && error < 0.f) )
+    //     {
+    //         ierror = ierrorTemp;
+    //     }
 
-        // Limit the integral to the amount needed to saturate the output
-        if (ierror * ki > outputMax)
-            ierror = outputMax / ki;
-        if (ierror * ki < outputMin)
-            ierror = outputMin / ki;
-    }
+    //     // Limit the integral to the amount needed to saturate the output
+    //     if (ierror * ki > outputMax)
+    //         ierror = outputMax / ki;
+    //     if (ierror * ki < outputMin)
+    //         ierror = outputMin / ki;
+    // }
 
     return control > outputMax ? outputMax : (control < outputMin ? outputMin : control);
 }
