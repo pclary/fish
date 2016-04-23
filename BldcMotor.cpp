@@ -3,6 +3,8 @@
 #include <cmath>
 #include "utilities.h"
 
+#include "lut.h"
+
 
 BldcMotor::BldcMotor(int pin1, int pin2, int pin3, int enablePin) : pin1(pin1), pin2(pin2), pin3(pin3), enablePin(enablePin)
 {
@@ -26,41 +28,54 @@ BldcMotor::BldcMotor(int pin1, int pin2, int pin3, int enablePin) : pin1(pin1), 
     analogWriteResolution(12);
 }
 
-void BldcMotor::update(float fbd)
+void BldcMotor::update(uint16_t fbangle)
 {
-    float degrees = fbd;
-    if (current > 0.f)
-        degrees += leadAngle;
-    else if (current < 0.f)
-        degrees -= leadAngle;
+    uint16_t currentangle = fbangle;
+    if (current > 0)
+        currentangle += leadAngle;
+    else if (current < 0)
+        currentangle -= leadAngle;
 
-    setOutput(std::fabs(current), degrees);
+    const int abscurrent = std::abs(current);
+    setOutput(min(abscurrent, 65535), currentangle);
 }
 
 
-void BldcMotor::setCurrent(float cur)
+void BldcMotor::setCurrent(int cur)
 {
     current = cur;
 }
 
 
-void BldcMotor::setLeadAngle(float la)
+void BldcMotor::setLeadAngle(uint16_t la)
 {
     leadAngle = la;
 }
 
 
-void BldcMotor::setOutput(float magnitude, float degrees)
+void BldcMotor::setOutput(uint16_t magnitude, uint16_t angle)
 {
-    const int maxPwmInt = 4095;
+    // Input angle has 16 bit range, but internally 0..1023 is used for 0-360 deg
+    const size_t ph1 = angle / 64u;
+    const size_t ph2 = (ph1 + 341u) % 1024u;
+    const size_t ph3 = (ph1 + 693u) % 1024u;
 
-    float ph1 = degrees * pi/180.f;
-    float ph2 = ph1 + pi*2.f/3.f;
-    float ph3 = ph1 + pi*4.f/3.f;
+    // Not even bothering to deduplicate portions of sine wave
 
-    int pwmval1 = int((std::sin(ph1) + 1.f) / 2.f * maxPwmInt * magnitude);
-    int pwmval2 = int((std::sin(ph2) + 1.f) / 2.f * maxPwmInt * magnitude);
-    int pwmval3 = int((std::sin(ph3) + 1.f) / 2.f * maxPwmInt * magnitude);
+    // Input magnitude has full 16 bit range
+    // lookup table has a premultiplier of 4
+    const uint32_t pwmval1 = (lut[ph1] * magnitude) / 1048576u;
+    const uint32_t pwmval2 = (lut[ph2] * magnitude) / 1048576u;
+    const uint32_t pwmval3 = (lut[ph3] * magnitude) / 1048576u;
+
+    // Serial.print(magnitude);
+    // Serial.print(", ");
+    // Serial.print(angle);
+    // Serial.print(", ");
+    // Serial.print(ph1);
+    // Serial.print(", ");
+    // Serial.print(pwmval1);
+    // Serial.print("\n");
 
     analogWrite(pin1, pwmval1);
     analogWrite(pin2, pwmval2);
@@ -92,3 +107,5 @@ bool BldcMotor::getEnabled()
 {
     return enabled;
 }
+
+
