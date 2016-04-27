@@ -34,6 +34,8 @@ const int lowLimPin = 8;
 LowPass potALp;
 LowPass potBLp;
 
+bool decodeCommand();
+
 
 void setup()
 {
@@ -41,7 +43,7 @@ void setup()
 
     pinMode(13, OUTPUT);
     digitalWrite(13, HIGH);
-    Serial.begin(115200);
+    Serial.begin(921600);
 
 
     adc.setResolution(16, ADC_0);
@@ -85,13 +87,71 @@ void setup()
 }
 
 
-void loop()
-{
-}
+const size_t command_length = 1 + 3 + 1;
+uint8_t command_buffer[command_length];
+unsigned int command_bytes_received = 0;
 
 
 int stepperDir = HIGH;
 int stepperSpeed = 0;
+float refA = 0.f;
+float refB = 0.f;
+
+bool hlim = false;
+bool llim = false;
+
+
+void loop()
+{
+    if (Serial.available())
+    {
+        const uint8_t c = Serial.read();
+        if (c == 0xff) // Sync with 0xff
+            command_bytes_received = 0;
+
+        command_buffer[command_bytes_received++] = c;
+    }
+
+    if (command_bytes_received == command_length)
+    {
+        command_bytes_received = 0;
+
+        // Response byte:
+        // bit 0 (low): valid command received
+        // bit 1:       high limit switch
+        // bit 2:       low limit switch
+        uint8_t response = 0;
+        response |= decodeCommand() << 0;
+        response |= hlim << 1;
+        response |= llim << 2;
+        Serial.write(response);
+    }
+}
+
+
+bool decodeCommand()
+{
+    // Start byte
+    if (command_buffer[0] != char(0xff))
+        return false;
+
+    // 7-bit checksum
+    const unsigned char chks = command_buffer[1] +
+                               command_buffer[2] +
+                               command_buffer[3];
+    if ((chks & 0x7f) != command_buffer[4])
+        return false;
+
+    // Decode
+    stepperSpeed = abs(int8_t(command_buffer[1]) * 31);
+    stepperDir = int8_t(command_buffer[1]) > 0 ? HIGH : LOW;
+    refA = int8_t(command_buffer[2]) * 6.f;
+    refB = int8_t(command_buffer[3]) * 6.f;
+
+    return true;
+}
+
+
 unsigned int stepPeriodCounter = 0;
 
 
@@ -104,8 +164,8 @@ void controlLoopFcn()
 
     // Reference
     // const float refA = (millis()/500) % 2 == 1 ? 180.f : -180.f;
-    const float refA = 360.f;
-    const float refB = -600.f;
+    // const float refA = 360.f;
+    // const float refB = -600.f;
 
     // Feedback
     const auto adcVals = adc.readSynchronizedContinuous();
@@ -125,8 +185,8 @@ void controlLoopFcn()
     motorB.update(int(eangleB * 65536.f/360.f) % 65536);
 
     // Limit switches
-    const bool hlim = !digitalReadFast(highLimPin);
-    const bool llim = !digitalReadFast(lowLimPin);
+    hlim = !digitalReadFast(highLimPin);
+    llim = !digitalReadFast(lowLimPin);
 
     // if (hlim)
     // {
@@ -150,20 +210,23 @@ void controlLoopFcn()
     //         stepperSpeed += 30;
     // }
 
-    if (hlim)
-    {
-        stepperSpeed = 8000;
-        stepperDir = LOW;
-    }
-    else if (llim)
-    {
-        stepperSpeed = 8000;
-        stepperDir = HIGH;
-    }
+    // if (hlim)
+    // {
+    //     stepperSpeed = 8000;
+    //     stepperDir = LOW;
+    // }
+    // else if (llim)
+    // {
+    //     stepperSpeed = 8000;
+    //     stepperDir = HIGH;
+    // }
 
-
-    if (llim && hlim)
+    // Limit safeties
+    if ( (hlim && stepperDir == HIGH) || (llim && stepperDir == LOW) )
         stepperSpeed = 0;
+
+    // if (llim && hlim)
+    //     stepperSpeed = 0;
 
     // Step pulse
     const unsigned int stepPeriod = frequency / stepperSpeed - 1;
