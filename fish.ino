@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include "BldcMotor.h"
 #include "RingBuffer.h"
-#include "PIDController.h"
 #include "LowPass.h"
 #include <cmath>
 #include <ADC.h>
@@ -23,9 +22,6 @@ const float dt = 1.f/frequency;
 IntervalTimer loopTimer;
 void controlLoopFcn();
 
-PIDController pidA(dt);
-PIDController pidB(dt);
-
 const int stepPin = 11;
 const int dirPin = 12;
 const int highLimPin = 7;
@@ -33,6 +29,8 @@ const int lowLimPin = 8;
 
 LowPass potALp;
 LowPass potBLp;
+LowPass dpotALp;
+LowPass dpotBLp;
 
 bool decodeCommand();
 
@@ -56,15 +54,6 @@ void setup()
     adc.setAveraging(16, ADC_1);
     adc.startSynchronizedContinuous(potBPin, potAPin);
 
-
-    pidA.setOutputLimits(-maxCurrent, maxCurrent);
-    pidA.setTuning(0.01f, 0.f, 0.0001f);
-    pidA.setDerivLowpassFreq(50.f);
-
-    pidB.setOutputLimits(-maxCurrent, maxCurrent);
-    pidB.setTuning(0.01f, 0.f, 0.0001f);
-    pidB.setDerivLowpassFreq(50.f);
-
     motorA.setOutput(0, 0);
     motorA.enable();
     motorB.setOutput(0, 0);
@@ -72,6 +61,9 @@ void setup()
 
     potALp.setCutoffFreq(200.f, dt);
     potBLp.setCutoffFreq(200.f, dt);
+
+    dpotALp.setCutoffFreq(20.f, dt);
+    dpotBLp.setCutoffFreq(20.f, dt);
 
     pinMode(stepPin, OUTPUT);
     pinMode(dirPin, OUTPUT);
@@ -87,7 +79,7 @@ void setup()
 }
 
 
-const size_t command_length = 1 + 3 + 1;
+const size_t command_length = 1 + 5 + 1;
 uint8_t command_buffer[command_length];
 unsigned int command_bytes_received = 0;
 
@@ -96,6 +88,8 @@ int stepperDir = HIGH;
 int stepperSpeed = 0;
 float refA = 0.f;
 float refB = 0.f;
+float drefA = 0.f;
+float drefB = 0.f;
 
 bool hlim = false;
 bool llim = false;
@@ -138,8 +132,10 @@ bool decodeCommand()
     // 7-bit checksum
     const unsigned char chks = command_buffer[1] +
                                command_buffer[2] +
-                               command_buffer[3];
-    if ((chks & 0x7f) != command_buffer[4])
+                               command_buffer[3] +
+                               command_buffer[4] +
+                               command_buffer[5];
+    if ((chks & 0x7f) != command_buffer[6])
         return false;
 
     // Decode
@@ -147,12 +143,19 @@ bool decodeCommand()
     stepperDir = int8_t(command_buffer[1]) > 0 ? HIGH : LOW;
     refA = int8_t(command_buffer[2]) * 6.f;
     refB = int8_t(command_buffer[3]) * 6.f;
+    drefA = int8_t(command_buffer[4]) * 60.f;
+    drefB = int8_t(command_buffer[5]) * 60.f;
 
     return true;
 }
 
 
 unsigned int stepPeriodCounter = 0;
+
+float clamp(float f, float minmax)
+{
+    return f > minmax ? minmax : f < -minmax ? -minmax : f;
+}
 
 
 void controlLoopFcn()
@@ -171,12 +174,24 @@ void controlLoopFcn()
     const auto adcVals = adc.readSynchronizedContinuous();
     const float eangleA = (int(uint16_t(adcVals.result_adc1)) + potAOffset)*pot2eangle;
     const float eangleB = (int(uint16_t(adcVals.result_adc0)) + potBOffset)*pot2eangle;
+    const float potALast = potALp;
+    const float potBLast = potBLp;
     potALp.push(eangleA);
     potBLp.push(eangleB);
+    dpotALp.push((potALp - potALast)/dt);
+    dpotBLp.push((potBLp - potBLast)/dt);
 
     // Controller
-    const float currentA = pidA.update(refA - potALp);
-    const float currentB = pidB.update(refB - potBLp);
+    const float errorA = refA - potALp;
+    const float errorB = refB - potBLp;
+    const float derrorA = drefA - dpotALp;
+    const float derrorB = drefB - dpotBLp;
+
+    const float kp = 0.01f;
+    const float kd = 0.0002f;
+
+    const float currentA = clamp(kp*errorA + kd*derrorA, maxCurrent);
+    const float currentB = clamp(kp*errorB + kd*derrorB, maxCurrent);
     motorA.setCurrent(currentA * 65535.f);
     motorB.setCurrent(currentB * 65535.f);
 
