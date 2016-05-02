@@ -1,7 +1,6 @@
 #include "BldcMotor.h"
 #include "Arduino.h"
 #include <cmath>
-#include "utilities.h"
 
 #include "lut.h"
 
