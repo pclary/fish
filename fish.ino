@@ -32,8 +32,6 @@ LowPass potBLp;
 LowPass dpotALp;
 LowPass dpotBLp;
 
-bool decodeCommand();
-
 
 void setup()
 {
@@ -79,7 +77,7 @@ void setup()
 }
 
 
-const size_t command_length = 1 + 5 + 1;
+const size_t command_length = 1 + 7 + 1;
 uint8_t command_buffer[command_length];
 unsigned int command_bytes_received = 0;
 
@@ -94,16 +92,19 @@ float drefB = 0.f;
 bool hlim = false;
 bool llim = false;
 
+uint8_t clast = 0;
+bool decodeCommand();
 
 void loop()
 {
     if (Serial.available())
     {
         const uint8_t c = Serial.read();
-        if (c == 0xff) // Sync with 0xff
+        if (c == 0xff && clast == 0xff) // Sync with 0xff 0xff
             command_bytes_received = 0;
 
         command_buffer[command_bytes_received++] = c;
+        clast = c;
     }
 
     if (command_bytes_received == command_length)
@@ -126,25 +127,27 @@ void loop()
 bool decodeCommand()
 {
     // Start byte
-    if (command_buffer[0] != char(0xff))
+    if (command_buffer[0] != 0xff)
         return false;
 
     // 7-bit checksum
-    const unsigned char chks = command_buffer[1] +
-                               command_buffer[2] +
-                               command_buffer[3] +
-                               command_buffer[4] +
-                               command_buffer[5];
-    if ((chks & 0x7f) != command_buffer[6])
+    const uint8_t chks = command_buffer[1] +
+                         command_buffer[2] +
+                         command_buffer[3] +
+                         command_buffer[4] +
+                         command_buffer[5] +
+                         command_buffer[6] +
+                         command_buffer[7];
+    if ((chks & 0x7f) != command_buffer[8])
         return false;
 
     // Decode
     stepperSpeed = abs(int8_t(command_buffer[1]) * 31);
     stepperDir = int8_t(command_buffer[1]) > 0 ? HIGH : LOW;
-    refA = int8_t(command_buffer[2]) * 6.f;
-    refB = int8_t(command_buffer[3]) * 6.f;
-    drefA = int8_t(command_buffer[4]) * 60.f;
-    drefB = int8_t(command_buffer[5]) * 60.f;
+    refA = (int16_t(command_buffer[2] << 8u) | uint8_t(command_buffer[3])) * 0.0234f;
+    refB = (int16_t(command_buffer[4] << 8u) | uint8_t(command_buffer[5])) * 0.0234f;
+    drefA = int8_t(command_buffer[6]) * 60.f;
+    drefB = int8_t(command_buffer[7]) * 60.f;
 
     return true;
 }
@@ -165,15 +168,11 @@ void controlLoopFcn()
     // Stepper direction
     digitalWriteFast(dirPin, stepperDir);
 
-    // Reference
-    // const float refA = (millis()/500) % 2 == 1 ? 180.f : -180.f;
-    // const float refA = 360.f;
-    // const float refB = -600.f;
-
     // Feedback
     const auto adcVals = adc.readSynchronizedContinuous();
     const float eangleA = (int(uint16_t(adcVals.result_adc1)) + potAOffset)*pot2eangle;
     const float eangleB = (int(uint16_t(adcVals.result_adc0)) + potBOffset)*pot2eangle;
+
     const float potALast = potALp;
     const float potBLast = potBLp;
     potALp.push(eangleA);
@@ -196,45 +195,12 @@ void controlLoopFcn()
     motorB.setCurrent(currentB * 65535.f);
 
     // Commutation
-    motorA.update(int(eangleA * 65536.f/360.f) % 65536);
-    motorB.update(int(eangleB * 65536.f/360.f) % 65536);
+    motorA.update(int(potALp * 65536.f/360.f) % 65536);
+    motorB.update(int(potBLp * 65536.f/360.f) % 65536);
 
     // Limit switches
     hlim = !digitalReadFast(highLimPin);
     llim = !digitalReadFast(lowLimPin);
-
-    // if (hlim)
-    // {
-    //     if (stepperSpeed == 0)
-    //         stepperDir = LOW;
-
-    //     if (stepperDir == HIGH)
-    //         stepperSpeed -= 20;
-    //     else if (stepperSpeed < 4000)
-    //         stepperSpeed += 30;
-    // }
-
-    // if (llim)
-    // {
-    //     if (stepperSpeed == 0)
-    //         stepperDir = HIGH;
-
-    //     if (stepperDir == LOW)
-    //         stepperSpeed -= 20;
-    //     else if (stepperSpeed < 4000)
-    //         stepperSpeed += 30;
-    // }
-
-    // if (hlim)
-    // {
-    //     stepperSpeed = 8000;
-    //     stepperDir = LOW;
-    // }
-    // else if (llim)
-    // {
-    //     stepperSpeed = 8000;
-    //     stepperDir = HIGH;
-    // }
 
     // Limit safeties
     if ( (hlim && stepperDir == HIGH) || (llim && stepperDir == LOW) )
