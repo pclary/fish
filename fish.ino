@@ -26,6 +26,8 @@ const int stepPin = 11;
 const int dirPin = 12;
 const int highLimPin = 7;
 const int lowLimPin = 8;
+const int startPin = 15;
+
 
 LowPass potALp;
 LowPass potBLp;
@@ -43,12 +45,12 @@ void setup()
 
 
     adc.setResolution(16, ADC_0);
-    adc.setConversionSpeed(ADC_HIGH_SPEED, ADC_0);
-    adc.setSamplingSpeed(ADC_HIGH_SPEED, ADC_0);
+    adc.setConversionSpeed(ADC_LOW_SPEED, ADC_0);
+    adc.setSamplingSpeed(ADC_LOW_SPEED, ADC_0);
     adc.setAveraging(16, ADC_0);
     adc.setResolution(16, ADC_1);
-    adc.setConversionSpeed(ADC_HIGH_SPEED, ADC_1);
-    adc.setSamplingSpeed(ADC_HIGH_SPEED, ADC_1);
+    adc.setConversionSpeed(ADC_LOW_SPEED, ADC_1);
+    adc.setSamplingSpeed(ADC_LOW_SPEED, ADC_1);
     adc.setAveraging(16, ADC_1);
     adc.startSynchronizedContinuous(potBPin, potAPin);
 
@@ -57,16 +59,17 @@ void setup()
     motorB.setOutput(0, 0);
     motorB.enable();
 
-    potALp.setCutoffFreq(200.f, dt);
-    potBLp.setCutoffFreq(200.f, dt);
+    potALp.setCutoffFreq(1000.f, dt);
+    potBLp.setCutoffFreq(1000.f, dt);
 
-    dpotALp.setCutoffFreq(20.f, dt);
-    dpotBLp.setCutoffFreq(20.f, dt);
+    dpotALp.setCutoffFreq(100.f, dt);
+    dpotBLp.setCutoffFreq(100.f, dt);
 
     pinMode(stepPin, OUTPUT);
     pinMode(dirPin, OUTPUT);
     pinMode(highLimPin, INPUT_PULLUP);
     pinMode(lowLimPin, INPUT_PULLUP);
+    pinMode(startPin, INPUT_PULLUP);
 
     delay(500);
     Serial.write("\n");
@@ -91,6 +94,7 @@ float drefB = 0.f;
 
 bool hlim = false;
 bool llim = false;
+bool start = false;
 
 uint8_t clast = 0;
 bool decodeCommand();
@@ -117,8 +121,9 @@ void loop()
         // bit 2:       low limit switch
         uint8_t response = 0;
         response |= decodeCommand() << 0;
-        response |= hlim << 1;
-        response |= llim << 2;
+        response |= hlim  << 1;
+        response |= llim  << 2;
+        response |= start << 3;
         Serial.write(response);
     }
 }
@@ -161,6 +166,12 @@ float clamp(float f, float minmax)
 }
 
 
+float deadband(float f, float deadband)
+{
+    return f > deadband ? f - deadband : f < -deadband ? f + deadband : 0.f;
+}
+
+
 void controlLoopFcn()
 {
     digitalWriteFast(13, HIGH);
@@ -181,13 +192,13 @@ void controlLoopFcn()
     dpotBLp.push((potBLp - potBLast)/dt);
 
     // Controller
-    const float errorA = refA - potALp;
-    const float errorB = refB - potBLp;
-    const float derrorA = drefA - dpotALp;
-    const float derrorB = drefB - dpotBLp;
+    const float errorA = deadband(refA - potALp, 0.f);
+    const float errorB = deadband(refB - potBLp, 0.f);
+    const float derrorA = deadband(drefA - dpotALp, 500.f);
+    const float derrorB = deadband(drefB - dpotBLp, 500.f);
 
     const float kp = 0.01f;
-    const float kd = 0.0002f;
+    const float kd = 0.0001f;
 
     const float currentA = clamp(kp*errorA + kd*derrorA, maxCurrent);
     const float currentB = clamp(kp*errorB + kd*derrorB, maxCurrent);
@@ -199,8 +210,9 @@ void controlLoopFcn()
     motorB.update(int(potBLp * 65536.f/360.f) % 65536);
 
     // Limit switches
-    hlim = !digitalReadFast(highLimPin);
-    llim = !digitalReadFast(lowLimPin);
+    hlim  = !digitalReadFast(highLimPin);
+    llim  = !digitalReadFast(lowLimPin);
+    start = !digitalReadFast(startPin);
 
     // Limit safeties
     if ( (hlim && stepperDir == HIGH) || (llim && stepperDir == LOW) )
