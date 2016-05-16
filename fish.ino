@@ -153,7 +153,7 @@ bool decodeCommand()
 
     // Decode
     stepperSpeedMax = abs(uint8_t(command_buffer[1]) * 16);
-    stepperTarget = (uint16_t(command_buffer[2] << 8u) | uint8_t(command_buffer[3])) * 1;
+    stepperTarget = (uint16_t(command_buffer[2] << 8u) | uint8_t(command_buffer[3])) / 32;
     refA = (int16_t(command_buffer[4] << 8u) | uint8_t(command_buffer[5])) * 0.0234f;
     refB = (int16_t(command_buffer[6] << 8u) | uint8_t(command_buffer[7])) * 0.0234f;
     drefA = int8_t(command_buffer[8]) * 60.f;
@@ -189,7 +189,7 @@ void controlLoopFcn()
     int stepperSpeed;
     if (homing)
     {
-        stepperSpeed = 100;
+        stepperSpeed = 800;
         stepperDir = LOW;
     }
     else
@@ -271,6 +271,10 @@ void controlLoopFcn()
         digitalWriteFast(stepPin, HIGH);
         stepPeriodCounter = 0;
         delayMicroseconds(2);
+        if (stepperDir == HIGH)
+            ++stepperPosition;
+        else
+            --stepperPosition;
         digitalWriteFast(stepPin, LOW);
     }
     else
