@@ -21,10 +21,12 @@ def clamp(n, minn, maxn):
     return max(min(maxn, n), minn)
 
 
-def command(x, pan, dpan, tilt, dtilt):
-    x = clamp(int(x*127), -127, 127)
-    if x < 0:
-        x = 255 + x
+def command(x, dx, pan, dpan, tilt, dtilt, home):
+    x = clamp(int(pan*65535), 0, 65534);
+    xh = x >> 8 & 0xff
+    xl = x & 0xff
+
+    dx = clamp(int(x*255), 0, 254)
 
     pan = clamp(int(pan*32767), -32767, 32767);
     panh = pan >> 8 & 0xff
@@ -37,7 +39,7 @@ def command(x, pan, dpan, tilt, dtilt):
     tiltl = tilt & 0xff
     if tilth < 0:
         tilth = 255 - tilth
-        
+
     dpan = clamp(int(dpan/10.0*127), -127, 127)
     if dpan < 0:
         dpan = 255 + dpan
@@ -45,10 +47,14 @@ def command(x, pan, dpan, tilt, dtilt):
     if dtilt < 0:
         dtilt = 255 + dtilt
 
-    checksum = (x + panh + panl + tilth + tiltl + dtilt + dpan) & 0x7f
-    ser.write(bytearray([0xff, 0xff, x, tilth, tiltl, panh, panl, dtilt, dpan, checksum]))
+    flags = 0x00
+    if home:
+        flags = flags & 0x01
 
-    
+    checksum = (xh + xl + dx + panh + panl + tilth + tiltl + dtilt + dpan + flags) & 0x7f
+    ser.write(bytearray([0xff, 0xff, dx, xh, xl, tilth, tiltl, panh, panl, dtilt, dpan, flags, checksum]))
+
+
 pan = -0.3
 tilt = 0.8
 tiltn = 0.8
@@ -96,12 +102,12 @@ while True:
     dpan = (pan - panlast)/dt;
 
     command(x, pan, dpan, tilt, dtilt)
-        
+
     ret, frame = camera.read()
     cv2.imshow('fish', frame)
     cv2.waitKey(1)
     # time.sleep(dt)
-    
+
     pygame.event.pump()
 
 camera.release()

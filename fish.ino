@@ -80,13 +80,15 @@ void setup()
 }
 
 
-const size_t command_length = 1 + 7 + 1;
+const size_t command_length = 1 + 10 + 1;
 uint8_t command_buffer[command_length];
 unsigned int command_bytes_received = 0;
 
 
-int stepperDir = HIGH;
-int stepperSpeed = 0;
+bool homing = false;
+int stepperSpeedMax = 0;
+int stepperTarget = 0;
+int stepperPosition = 0;
 float refA = 0.f;
 float refB = 0.f;
 float drefA = 0.f;
@@ -142,17 +144,22 @@ bool decodeCommand()
                          command_buffer[4] +
                          command_buffer[5] +
                          command_buffer[6] +
-                         command_buffer[7];
-    if ((chks & 0x7f) != command_buffer[8])
+                         command_buffer[7] +
+                         command_buffer[8] +
+                         command_buffer[9] +
+                         command_buffer[10];
+    if ((chks & 0x7f) != command_buffer[11])
         return false;
 
     // Decode
-    stepperSpeed = abs(int8_t(command_buffer[1]) * 31);
-    stepperDir = int8_t(command_buffer[1]) > 0 ? HIGH : LOW;
-    refA = (int16_t(command_buffer[2] << 8u) | uint8_t(command_buffer[3])) * 0.0234f;
-    refB = (int16_t(command_buffer[4] << 8u) | uint8_t(command_buffer[5])) * 0.0234f;
-    drefA = int8_t(command_buffer[6]) * 60.f;
-    drefB = int8_t(command_buffer[7]) * 60.f;
+    stepperSpeedMax = abs(uint8_t(command_buffer[1]) * 16);
+    stepperTarget = (uint16_t(command_buffer[2] << 8u) | uint8_t(command_buffer[3])) * 1;
+    refA = (int16_t(command_buffer[4] << 8u) | uint8_t(command_buffer[5])) * 0.0234f;
+    refB = (int16_t(command_buffer[6] << 8u) | uint8_t(command_buffer[7])) * 0.0234f;
+    drefA = int8_t(command_buffer[8]) * 60.f;
+    drefB = int8_t(command_buffer[9]) * 60.f;
+    const uint8_t flags = command_buffer[10];
+    homing = homing || (flags & 0x01);
 
     return true;
 }
@@ -175,6 +182,34 @@ float deadband(float f, float deadband)
 void controlLoopFcn()
 {
     digitalWriteFast(13, HIGH);
+
+    // Calculate stepper speed and direction to hit target
+    // If homing, slowly move in the negative direction
+    int stepperDir;
+    int stepperSpeed;
+    if (homing)
+    {
+        stepperSpeed = 100;
+        stepperDir = LOW;
+    }
+    else
+    {
+        if (stepperTarget > stepperPosition)
+        {
+            stepperSpeed = stepperSpeedMax;
+            stepperDir = HIGH;
+        }
+        else if (stepperTarget < stepperPosition)
+        {
+            stepperSpeed = stepperSpeedMax;
+            stepperDir = LOW;
+        }
+        else
+        {
+            stepperSpeed = 0;
+            stepperDir = HIGH;
+        }
+    }
 
     // Stepper direction
     digitalWriteFast(dirPin, stepperDir);
@@ -213,6 +248,13 @@ void controlLoopFcn()
     hlim  = !digitalReadFast(highLimPin);
     llim  = !digitalReadFast(lowLimPin);
     start = !digitalReadFast(startPin);
+
+    // If homing, set the zero when the lower limit switch is pressed
+    if (homing && llim)
+    {
+        stepperPosition = 0;
+        homing = false;
+    }
 
     // Limit safeties
     if ( (hlim && stepperDir == HIGH) || (llim && stepperDir == LOW) )
