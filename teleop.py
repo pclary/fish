@@ -55,6 +55,7 @@ def command(x, dx, pan, dpan, tilt, dtilt, home):
     ser.write(bytearray([0xff, 0xff, dx, xh, xl, tilth, tiltl, panh, panl, dtilt, dpan, flags, checksum]))
 
 
+x = 0;
 pan = -0.3
 tilt = 0.8
 tiltn = 0.8
@@ -64,22 +65,24 @@ tilth = 0.9
 dt = 1/60.0
 panlast = 0
 tiltlast = 0
+xlast = 0
+
+command(0, 0, 0, 0, 0, 0, True)
 
 while True:
     keyState = pygame.key.get_pressed()
     panlast = pan
     tiltlast = tilt
-
-    x = 0
+    xlast = x
 
     factor = 1
     if keyState[pygame.K_LSHIFT]:
         factor = 0.03
 
     if keyState[pygame.K_LEFT]:
-        x += 0.2*factor
+        x += 0.01*factor
     if keyState[pygame.K_RIGHT]:
-        x -= 0.2*factor
+        x -= 0.01*factor
     if keyState[pygame.K_UP] and pan < 1:
         pan += 0.005*factor
     if keyState[pygame.K_DOWN] and pan > -1:
@@ -98,10 +101,11 @@ while True:
     if keyState[pygame.K_ESCAPE]:
         break
 
-    dtilt = (tilt - tiltlast)/dt;
-    dpan = (pan - panlast)/dt;
+    dtilt = (tilt - tiltlast)/dt
+    dpan = (pan - panlast)/dt
+    dx = 0.2
 
-    command(x, pan, dpan, tilt, dtilt)
+    command(x, dx, pan, dpan, tilt, dtilt, False)
 
     ret, frame = camera.read()
     cv2.imshow('fish', frame)
