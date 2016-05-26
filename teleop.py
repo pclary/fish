@@ -3,15 +3,12 @@ import sys
 import time
 import serial
 import math
-# import cv2
-
-# camera = cv2.VideoCapture(0)
-# camera.set(cv2.cv.CV_CAP_PROP_FPS, 60)
 
 # configure the serial connections (the parameters differs on the device you are connecting to)
 ser = serial.Serial(
     port='/dev/ttyACM0',
-    baudrate=921600
+    baudrate=921600,
+    timeout=None
 )
 pygame.init()
 
@@ -52,15 +49,23 @@ def command(x, dx, pan, dpan, tilt, dtilt, home):
         flags = flags | 0x01
 
     checksum = (xh + xl + dx + panh + panl + tilth + tiltl + dtilt + dpan + flags) & 0x7f
+
     ser.write(bytearray([0xff, 0xff, dx, xh, xl, tilth, tiltl, panh, panl, dtilt, dpan, flags, checksum]))
+    if ser.in_waiting:
+        return_code = ord(ser.read(1))
+    else:
+        return_code = 0
+    ser.reset_input_buffer()
+
+    return {'hlim': bool(return_code & 0x02), 'llim': bool(return_code & 0x04), 'start': bool(return_code & 0x08), 'catch': bool(return_code & 0x01)}
 
 
 x = 0;
 pan = -0.3
 tilt = 0.8
-tiltn = 0.8
-tiltl = 0.7
-tilth = 0.9
+tiltn = 0.7
+tiltl = 0.6
+tilth = 0.8
 
 dt = 1/60.0
 panlast = 0
@@ -78,7 +83,7 @@ while True:
 
     factor = 1
     if keyState[pygame.K_LSHIFT]:
-        factor = 0.3
+        factor = 0.1
 
     if keyState[pygame.K_LEFT] and x < 1:
         x += 0.01*factor
@@ -109,14 +114,12 @@ while True:
     if xdiff > 0:
         dx = xdiff/dt * 0.45
 
-    command(x, dx, pan, dpan, tilt, dtilt, False)
+    ret = command(x, dx, pan, dpan, tilt, dtilt, False)
+    # print 'x={}, pan={}'.format(x, pan)
+    # print ret
 
-    # ret, frame = camera.read()
-    # cv2.imshow('fish', frame)
-    # cv2.waitKey(1)
+
     time.sleep(dt)
 
     pygame.event.pump()
 
-# camera.release()
-# cv2.destroyAllWindows()
