@@ -20,11 +20,28 @@ ser = serial.Serial(port = '/dev/ttyACM0', baudrate = 921600, timeout = None)
 # Constants
 ################################################################################
 
-above_board_tilt = 0.73
-rod_down_tilt = 0.85
-raise_fish_tilt = 0.55
-shake_low_tilt = 0.9
-shake_high_tilt = 0.7
+tilt_above_board = 0.73
+tilt_rod_down = 0.82
+tilt_raise_fish = 0.6
+tilt_shake_low = 0.9
+tilt_shake_high = 0.7
+tilt_over_box = 0.5
+
+pan_dropoff = 0.2
+x_dropoff = 0
+
+pan_default = -0.6
+x_default = 1
+
+x_speed_slow = 0.3
+x_speed_fast = 0.5
+pan_speed_slow = 0.15
+pan_speed_fast = 0.3
+tilt_speed_slow = 0.15
+tilt_speed_fast = 0.3
+tilt_speed_catch = 0.6
+tilt_speed_shake = 1
+
 
 ################################################################################
 # Globals
@@ -32,7 +49,7 @@ shake_high_tilt = 0.7
 
 x_last = 0
 pan_last = 0
-tilt_last = raise_fish_tilt
+tilt_last = tilt_raise_fish
 robot_data = {'ack': False, 'hlim': False, 'llim': False, 'start': False, 'caught': False, 'pushing': False}
 
 
@@ -50,19 +67,19 @@ def command(x, dx, pan, dpan, tilt, dtilt, home=False):
     pan_last = pan
     tilt_last = tilt
 
-    x = clamp(int(x*65535), 0, 65534);
+    x = clamp(int(x*65535), 0, 65534)
     xh = x >> 8 & 0xff
     xl = x & 0xff
 
     dx = clamp(int(dx*255), 0, 254)
 
-    pan = clamp(int(pan*32767), -32767, 32767);
+    pan = clamp(int(pan*32767), -32767, 32767)
     panh = pan >> 8 & 0xff
     panl = pan & 0xff
     if panh < 0:
         panh = 255 - panh
 
-    tilt = clamp(int(tilt*32767), -32767, 32767);
+    tilt = clamp(int(tilt*32767), -32767, 32767)
     tilth = tilt >> 8 & 0xff
     tiltl = tilt & 0xff
     if tilth < 0:
@@ -92,8 +109,16 @@ def command(x, dx, pan, dpan, tilt, dtilt, home=False):
         robot_data['pushing'] = bool(return_code & 0x20)
 
     ser.reset_input_buffer()
-
     return robot_data
+
+
+def x_speed_actual(x_speed):
+    x_speed = clamp(int(x_speed*255), 0, 254)
+    x_speed *= 16
+    period = 8000 // x_speed
+    steps_per_second = 8000 / period
+    steps_in_range = 65535 // 32
+    return steps_per_second / steps_in_range
 
 
 def move_with_speed(x, x_speed, pan, pan_speed, tilt, tilt_speed):
@@ -101,21 +126,30 @@ def move_with_speed(x, x_speed, pan, pan_speed, tilt, tilt_speed):
     time_last = time.time()
     dt = 1/100
 
-    x_time = math.fabs((x - x_last) / x_speed)
+    if x_speed > 0:
+        x_time = math.fabs((x - x_last) / x_speed_actual(x_speed))
+    else:
+        x_time = 0
     pan_dir = math.copysign(1, pan - pan_last)
     tilt_dir = math.copysign(1, tilt - tilt_last)
 
     pan_speed = math.copysign(pan_speed, pan_dir)
     tilt_speed = math.copysign(tilt_speed, tilt_dir)
 
+    def pan_complete():
+        return pan_speed == 0 or (pan - pan_last) * pan_dir <= 0
+
+    def tilt_complete():
+        return tilt_speed == 0 or (tilt - tilt_last) * tilt_dir <= 0
+
     # Send a command update once every dt periof
-    while (pan - pan_last) * pan_dir > 0 or (tilt - tilt_last) * tilt_dir > 0:
-        if (pan - pan_last) * pan_dir > 0:
+    while not pan_complete() or not tilt_complete():
+        if not pan_complete():
             pan_new = pan_last + pan_speed * dt
         else:
             pan_new = pan
 
-        if (tilt - tilt_last) * tilt_dir > 0:
+        if not tilt_complete():
             tilt_new = tilt_last + tilt_speed * dt
         else:
             tilt_new = tilt;
@@ -128,6 +162,7 @@ def move_with_speed(x, x_speed, pan, pan_speed, tilt, tilt_speed):
     # Wait until the x axis is done
     while time.time() - start_time < x_time:
         command(x, x_speed, pan, 0, tilt, 0)
+
 
 def poll_robot_data():
     return command(x_last, 0, pan_last, 0, tilt_last, 0)
@@ -163,13 +198,19 @@ def valid_x_pan(x, pan):
 
 # Home the x axis
 print 'Homing x axis...'
-ret = command(0, 1, -0.6, 0, raise_fish_tilt, 0, True)
+ret = command(0, 1,
+              pan_default, pan_speed_slow,
+              tilt_raise_fish, tilt_speed_slow, True)
 while not ret['llim']:
-    ret = command(0, 1, -0.6, 0, raise_fish_tilt, 0, True)
+    ret = command(0, 1,
+                  pan_default, 0,
+                  tilt_raise_fish, 0, True)
 print 'Homing complete'
 
 # Move out of the way of the camera
-move_with_speed(1, 0.3, -0.6, 1, above_board_tilt, 0.1)
+move_with_speed(x_default, x_speed_fast,
+                pan_default, pan_speed_fast,
+                tilt_above_board, tilt_speed_slow)
 
 # Take a picture of the board
 print 'Imaging board...'
@@ -203,8 +244,6 @@ detector = cv2.SimpleBlobDetector(params)
 keypoints = detector.detect(mask_red)
 
 frame_with_keypoints = cv2.drawKeypoints(frame, keypoints, np.array([]), (0, 255, 0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-# cv2.imshow('Fishing spots', frame_with_keypoints)
-# cv2.waitKey(100)
 
 fishing_spots = [];
 for keypoint in keypoints:
@@ -227,7 +266,9 @@ while robot_data['start']:
     print 'Choosing a new spot...'
     spot = random.choice(fishing_spots)
     (x, pan) = pixel_to_x_pan(spot)
-    move_with_speed(x, 0.1, pan, 0.1, above_board_tilt, 0.1)
+    move_with_speed(x, x_speed_slow,
+                    pan, pan_speed_slow,
+                    tilt_above_board, tilt_speed_slow)
 
     # Try to catch fish here up to some number of times
     for _ in xrange(5):
@@ -236,47 +277,69 @@ while robot_data['start']:
             break
 
         # Dip rod
-        move_with_speed(x, 0.1, pan, 0.1, rod_down_tilt, 0.3)
+        move_with_speed(x, 0,
+                        pan, 0,
+                        tilt_rod_down, tilt_speed_catch)
 
         # If rod is pushing against something, it didn't go into a fish
         if robot_data['pushing']:
-            move_with_speed(x, 0.1, pan, 0.1, above_board_tilt, 0.1)
-            time.sleep(1)
+            move_with_speed(x, 0,
+                            pan, 0,
+                            tilt_above_board, tilt_speed_slow)
+            time.sleep(random.uniform(0.5, 1.0))
         else:
             # Rod is in a fish, so wait a bit and pick it up
+            print 'Got a nibble..'
             time.sleep(1)
-            move_with_speed(x, 0.1, pan, 0.1, raise_fish_tilt, 0.3)
+            move_with_speed(x, 0,
+                            pan, 0,
+                            tilt_raise_fish, tilt_speed_fast)
             time.sleep(0.3)
 
-            # Check whether the fish was caught
-            poll_robot_data()
-            if robot_data['caught']:
-                print 'Caught a fish!'
+        # Check whether the fish was caught
+        poll_robot_data()
+        if robot_data['caught']:
+            print 'Caught a fish!'
 
-                # Bring the fish to the goal area
-                move_with_speed(0, 0.2, pan, 0.3, raise_fish_tilt, 0.3)
-                move_with_speed(0, 0.2, 0.3, 0.3, raise_fish_tilt, 0.3)
+            # Bring the fish to the goal area
+            move_with_speed(x_dropoff, x_speed_slow,
+                            pan_last, 0,
+                            tilt_over_box, tilt_speed_slow)
+            move_with_speed(x_dropoff, 0,
+                            pan_dropoff, pan_speed_fast,
+                            tilt_over_box, 0)
 
-                # Shake some number of times or until free
-                for _ in xrange(10):
-                    print 'Released fish!'
-                    move_with_speed(0, 0.2, 0.3, 0.3, shake_low_tilt, 1)
-                    move_with_speed(0, 0.2, 0.3, 0.3, shake_high_tilt, 1)
-                    move_with_speed(0, 0.2, 0.3, 0.3, shake_low_tilt, 1)
-                    move_with_speed(0, 0.2, 0.3, 0.3, shake_high_tilt, 1)
-                    move_with_speed(0, 0.2, 0.3, 0.3, raise_fish_tilt, 1)
-                    time.sleep(0.3)
-                    poll_robot_data()
-                    if not robot_data['caught']:
-                        break
+            # Shake some number of times or until free
+            for _ in xrange(10):
+                print 'Released fish!'
+                move_with_speed(x_dropoff, 0,
+                                pan_dropoff, 0,
+                                tilt_shake_low, tilt_speed_shake)
+                move_with_speed(x_dropoff, 0,
+                                pan_dropoff, 0,
+                                tilt_shake_high, tilt_speed_shake)
+                move_with_speed(x_dropoff, 0,
+                                pan_dropoff, 0,
+                                tilt_shake_low, tilt_speed_shake)
+                move_with_speed(x_dropoff, 0,
+                                pan_dropoff, 0,
+                                tilt_shake_high, tilt_speed_shake)
+                time.sleep(0.3)
+                poll_robot_data()
+                if not robot_data['caught']:
+                    break
 
-                # Return to main workspace
-                move_with_speed(0, 0.2, -0.3, 0.1, raise_fish_tilt, 0.1)
-                break
+            # Return to main workspace
+            move_with_speed(0, x_speed_fast,
+                            0, pan_speed_fast,
+                            tilt_over_box, tilt_speed_fast)
+            break
 
 # Get out of the way when finished
 print 'Stopping...'
-move_with_speed(1, 0.3, -0.6, 1, above_board_tilt, 0.1)
+move_with_speed(x_neutral, x_move_fast,
+                pan_neutral, pan_move_slow,
+                tilt_above_board, tilt_speed_fast)
 
 # OpenCV cleanup
 cap.release()
