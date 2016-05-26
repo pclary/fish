@@ -33,6 +33,7 @@ LowPass potALp;
 LowPass potBLp;
 LowPass dpotALp;
 LowPass dpotBLp;
+LowPass fishForceLp;
 
 
 void setup()
@@ -64,6 +65,8 @@ void setup()
 
     dpotALp.setCutoffFreq(100.f, dt);
     dpotBLp.setCutoffFreq(100.f, dt);
+
+    fishForceLp.setCutoffFreq(4.f, dt);
 
     pinMode(stepPin, OUTPUT);
     pinMode(dirPin, OUTPUT);
@@ -97,6 +100,8 @@ float drefB = 0.f;
 bool hlim = false;
 bool llim = false;
 bool start = false;
+bool caught = false;
+bool pushing = false;
 
 uint8_t clast = 0;
 bool decodeCommand();
@@ -123,9 +128,11 @@ void loop()
         // bit 2:       low limit switch
         uint8_t response = 0;
         response |= decodeCommand() << 0;
-        response |= hlim  << 1;
-        response |= llim  << 2;
-        response |= start << 3;
+        response |= hlim    << 1;
+        response |= llim    << 2;
+        response |= start   << 3;
+        response |= caught  << 4;
+        response |= pushing << 5;
         Serial.write(response);
     }
 }
@@ -248,6 +255,11 @@ void controlLoopFcn()
     hlim  = !digitalReadFast(highLimPin);
     llim  = !digitalReadFast(lowLimPin);
     start = !digitalReadFast(startPin);
+
+    // Detect caught fish and when the rod is pushing down hard
+    fishForceLp.push(errorA);
+    caught = fishForceLp > -50.f && fishForceLp < -15.f;
+    pushing = fishForceLp > 20.f;
 
     // If homing, set the zero when the lower limit switch is pressed
     if (homing && llim)
