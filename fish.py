@@ -274,7 +274,10 @@ while robot_data['start']:
                 move_with_speed(0, 0.2, -0.3, 0.1, raise_fish_tilt, 0.1)
                 break
 
-cv2.waitKey()
+# Get out of the way when finished
+print 'Stopping...'
+move_with_speed(1, 0.3, -0.6, 1, above_board_tilt, 0.1)
 
+# OpenCV cleanup
 cap.release()
 cv2.destroyAllWindows()
