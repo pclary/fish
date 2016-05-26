@@ -290,7 +290,7 @@ while robot_data['start']:
         else:
             # Rod is in a fish, so wait a bit and pick it up
             print 'Got a nibble..'
-            time.sleep(1)
+            time.sleep(0.5)
             move_with_speed(x, 0,
                             pan, 0,
                             tilt_raise_fish, tilt_speed_fast)
