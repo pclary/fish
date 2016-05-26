@@ -259,7 +259,7 @@ void controlLoopFcn()
     // Detect caught fish and when the rod is pushing down hard
     fishForceLp.push(errorA);
     caught = fishForceLp > -50.f && fishForceLp < -15.f;
-    pushing = fishForceLp > 20.f;
+    pushing = fishForceLp > 5.f;
 
     // If homing, set the zero when the lower limit switch is pressed
     if (homing && llim)
