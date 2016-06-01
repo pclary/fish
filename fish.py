@@ -30,8 +30,9 @@ tilt_over_box = 0.5
 pan_dropoff = 0.2
 x_dropoff = 0
 
-pan_default = -0.6
+pan_default = -0.05
 x_default = 1
+tilt_default = 0.2
 
 x_speed_slow = 0.3
 x_speed_fast = 0.5
@@ -210,7 +211,7 @@ print 'Homing complete'
 # Move out of the way of the camera
 move_with_speed(x_default, x_speed_fast,
                 pan_default, pan_speed_fast,
-                tilt_above_board, tilt_speed_slow)
+                tilt_default, tilt_speed_slow)
 
 # Take a picture of the board
 print 'Imaging board...'
@@ -221,29 +222,32 @@ print 'Extracting fishing spots...'
 
 # Get red pixels
 hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-lower_magenta = np.array([170, 150, 80], dtype = 'uint8')
-upper_magenta = np.array([179, 255, 255], dtype = 'uint8')
-lower_orange = np.array([0, 150, 80], dtype = 'uint8')
-upper_orange = np.array([10, 255, 255], dtype = 'uint8')
+lower_magenta = np.array([170, 100, 80], dtype = 'uint8')
+upper_magenta = np.array([180, 255, 180], dtype = 'uint8')
+lower_orange = np.array([0, 100, 80], dtype = 'uint8')
+upper_orange = np.array([20, 255, 180], dtype = 'uint8')
 mask_magenta = cv2.inRange(hsv_frame, lower_magenta, upper_magenta)
 mask_orange = cv2.inRange(hsv_frame, lower_orange, upper_orange)
 mask_red = cv2.add(mask_magenta, mask_orange)
-mask_red_blur = cv2.blur(mask_red, (5, 5))
+mask_red_blur = cv2.blur(mask_red, (9, 9))
 
 # Find blobs
 params = cv2.SimpleBlobDetector_Params()
 params.filterByColor = True
 params.blobColor = 255
 params.filterByArea = True
-params.minArea = 20
+params.minArea = 100
 params.maxArea = 150
 params.filterByConvexity = True
 params.minConvexity = 0.8
 params.filterByCircularity = False
 detector = cv2.SimpleBlobDetector(params)
-keypoints = detector.detect(mask_red)
+keypoints = detector.detect(mask_red_blur)
 
 frame_with_keypoints = cv2.drawKeypoints(frame, keypoints, np.array([]), (0, 255, 0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+cv2.imshow('fasdf', mask_red_blur)#frame_with_keypoints)
+cv2.imshow('fasdf2', frame_with_keypoints)
+cv2.waitKey(100);
 
 fishing_spots = [];
 for keypoint in keypoints:
@@ -252,6 +256,20 @@ for keypoint in keypoints:
     if valid_x_pan(x, pan):
         fishing_spots.append(keypoint.pt)
 print 'Found {} fishing spots'.format(len(fishing_spots))
+
+# Move the robot to each fishing spot to confirm alignment
+print 'Moving to fishing spots...'
+for spot in fishing_spots:
+    (x, pan) = pixel_to_x_pan(spot)
+    move_with_speed(x, x_speed_slow,
+                    pan, pan_speed_slow,
+                    tilt_above_board - 0.02, tilt_speed_slow)
+    time.sleep(2)
+
+# Move back out of the way
+move_with_speed(x_default, x_speed_fast,
+                pan_default, pan_speed_fast,
+                tilt_above_board, tilt_speed_slow)
 
 # Wait for game to start
 print 'Waiting for start button...'
@@ -275,6 +293,11 @@ while robot_data['start']:
         # Break if the start button was turned off
         if not robot_data['start']:
             break
+
+        move_with_speed(x, x_speed_slow,
+                    pan, pan_speed_slow,
+                    tilt_above_board, tilt_speed_slow)
+        time.sleep(0.5)
 
         # Dip rod
         move_with_speed(x, 0,
@@ -337,9 +360,9 @@ while robot_data['start']:
 
 # Get out of the way when finished
 print 'Stopping...'
-move_with_speed(x_neutral, x_move_fast,
-                pan_neutral, pan_move_slow,
-                tilt_above_board, tilt_speed_fast)
+move_with_speed(x_default, x_speed_fast,
+                pan_default, pan_speed_fast,
+                tilt_default, tilt_speed_fast)
 
 # OpenCV cleanup
 cap.release()
